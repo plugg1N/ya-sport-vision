@@ -31,6 +31,6 @@ git clone https://github.com/YOUR-USERNAME/ya-sport-vision
 ```
 - В случае, если репозиторий с измнениями уже существует, стоит сделать `pull` для добавления свежих измнений в свой Fork
 
-3. После доавбления своих изменений в Fork, создавайте Pull Request на основной репозиторий (https://github.com/plugg1N/ya-sport-vision) на Branch `Test`
+3. После доавбления своих изменений в Fork, создавайте Pull Request на основной репозиторий (https://github.com/plugg1N/ya-sport-vision) на Branch `test`
 
 4. После согласования изменений - Pull Request будет одобрен, либо отправлен на переработку с комментариями
