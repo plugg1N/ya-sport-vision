@@ -48,10 +48,6 @@ def audio_to_text(*, dest_name: str, model_name: str) -> str:
     return result["text"]
 
 
-# Split into batches
-
-
-
 if __name__ == '__main__':
     url = 'https://www.youtube.com/watch?v=hWTvOa3vifU'
 
