@@ -1,20 +1,59 @@
-from pytube import YouTube
+import yt_dlp as youtube_dl
+# import whisper
+from pydub import AudioSegment
+import librosa
+import os
 
-url = 'https://www.youtube.com/watch?v=FByWlLb14gI'
 
-def youtube_video_downloader(video_url):
+# Split an audio into separate batches
+def split_into_batches(path: str) -> None:
+    audio = AudioSegment.from_file(path)
 
-    youtube_video = YouTube(video_url)
-    stream_number = 0
-    streaminfo = youtube_video.streams.filter(file_extension='mp4')
+    chunk_size = int(librosa.get_duration(path=path)) * 100  # in milliseconds
+    overlap = 2000                                           # in milliseconds
 
-    for s in streaminfo:
-        if 'itag="22"' in str(s):
-            stream_number = 22
-        elif 'itag="18"' in str(s):
-            stream_number = 18
-    
-    stream = youtube_video.streams.get_by_itag(stream_number)
-    stream.download('E:/',filename='downloadedvideo.mp4',timeout=12000)
+    start, end = 0, chunk_size
 
-youtube_video_downloader(url)
+    num_chunks = (len(audio) - overlap) // (chunk_size - overlap)
+
+    for i in range(num_chunks):
+        start = i * (chunk_size - overlap)
+        end = start + chunk_size
+
+        chunk = audio[start:end]
+        chunk.export(os.path.join('segments', f"chunk_{i}.wav"), format="wav")
+
+
+# Generate .mp3 file from .mp4 file
+def get_audio(link: str) -> None:
+    ydl_opts = {
+        'format': 'bestaudio/best',
+        'outtmpl': './audio',
+
+        'postprocessors': [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'mp3',
+            'preferredquality': '192',
+        }],
+    }
+
+    with youtube_dl.YoutubeDL(ydl_opts) as ydl:
+        ydl.download([link])
+
+
+# Use whisper to translate
+def audio_to_text(*, dest_name: str, model_name: str) -> str:
+    model = whisper.load_model(model_name)
+    result = model.transcribe(f'{dest_name}')
+    return result["text"]
+
+
+# Split into batches
+
+
+
+if __name__ == '__main__':
+    url = 'https://www.youtube.com/watch?v=hWTvOa3vifU'
+
+    get_audio(url)
+    split_into_batches('audio.mp3')
