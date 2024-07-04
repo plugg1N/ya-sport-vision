@@ -1,7 +1,6 @@
 import yt_dlp as youtube_dl
 # import whisper
 from pydub import AudioSegment
-from pydub.utils import make_chunks
 import librosa
 import os
 
