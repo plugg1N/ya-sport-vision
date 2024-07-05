@@ -25,11 +25,13 @@ class AudioDispatcher:
     # Split into batches
     def split_into_batches(self, *, link: str) -> None:
         self.__get_audio(link=link)
-        os.mkdir('segments')
 
+        if not os.path.exists('segments'):
+            os.mkdir('./segments')
+            
         audio = AudioSegment.from_file('audio.mp3')
 
-        chunk_size = int(librosa.get_duration(path='audio.mp3')) * 100  # in milliseconds
+        chunk_size = int(librosa.get_duration(path='audio.mp3')) * 1000 // 20  # in milliseconds
         overlap = 2000                                           # in milliseconds
 
         start, end = 0, chunk_size

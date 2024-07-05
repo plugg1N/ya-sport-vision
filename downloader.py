@@ -4,16 +4,21 @@ from Utils.audio_dp import AudioDispatcher      # Batch splitter
 
 
 if __name__ == '__main__':
-    url = 'https://www.youtube.com/watch?v=hn3zaQJd_hk'
+    url = 'https://www.youtube.com/watch?v=pqaBWcsBGyA'
 
-    stt = Whisper()
+    stt = Whisper('base')
     yt = YoutubeTranscribe()
     adp = AudioDispatcher()
 
-    try:
-        print(yt.process_url(link=url))
+    # adp.split_into_batches(link=url)
+    print(stt.speech_to_text('audio.mp3'))
 
-    except:
-        adp.split_into_batches(link=url)
-        print(stt.speech_to_text('audio.mp3', model_name='base'))
+    # try:
+    #     print(yt.process_url(link=url))
+
+    # except:
+    #     adp.split_into_batches(link=url)
+    #     print(stt.speech_to_text('audio.mp3'))
+
+
 
