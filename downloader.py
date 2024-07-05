@@ -1,6 +1,8 @@
 import yt_dlp as youtube_dl
+from youtube_sub import YoutubeTranscribe
 # import whisper
 from pydub import AudioSegment
+from wav2vec import Wav2Vec
 import librosa
 import os
 
@@ -41,15 +43,17 @@ def get_audio(link: str) -> None:
         ydl.download([link])
 
 
-# Use whisper to translate
-def audio_to_text(*, dest_name: str, model_name: str) -> str:
-    model = whisper.load_model(model_name)
-    result = model.transcribe(f'{dest_name}')
-    return result["text"]
 
 
 if __name__ == '__main__':
-    url = 'https://www.youtube.com/watch?v=hWTvOa3vifU'
+    url = 'https://www.youtube.com/watch?v=hn3zaQJd_hk'
+    stt = Wav2Vec()
+    yt = YoutubeTranscribe()
 
-    get_audio(url)
-    split_into_batches('audio.mp3')
+    try:
+        yt.process_url(link=url)
+
+    except:
+        get_audio(link=url)
+        
+
