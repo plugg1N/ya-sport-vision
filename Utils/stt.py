@@ -12,7 +12,7 @@ class Wav2Vec:
 
 
     # Analise audio file
-    def _librosa_audio(self, *, audio_file: str) -> list[Any]:
+    def __librosa_audio(self, *, audio_file: str) -> list[Any]:
         audio, _ = librosa.load(audio_file, sr=16000)
         audio = list(audio)
         return audio
@@ -21,7 +21,7 @@ class Wav2Vec:
     # Use wav2vec2 model to translate
     def speech_to_text(self, *, audio_file: str) -> str:
         with torch.no_grad():
-            input_values = torch.tensor(self._librosa_audio(audio_file=audio_file)).unsqueeze(0)  #, device="cuda
+            input_values = torch.tensor(self.__librosa_audio(audio_file=audio_file)).unsqueeze(0)  #, device="cuda
             logins_model = self.model(input_values).logits
         pred_ids = torch.argmax(logins_model, dim=-1)
         batch = self.processor.batch_decode(pred_ids)[0]
