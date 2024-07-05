@@ -1,5 +1,6 @@
 from transformers import AutoModelForCTC, Wav2Vec2Processor
 from typing import List, Any
+import whisper
 import librosa
 import torch
 
@@ -25,3 +26,11 @@ class Wav2Vec:
         pred_ids = torch.argmax(logins_model, dim=-1)
         batch = self.processor.batch_decode(pred_ids)[0]
         return batch
+
+
+
+class Whisper:
+    def speech_to_text(self, /, path: str, *, model_name: str) -> str:
+        model = whisper.load_model(model_name)
+        result = model.transcribe(f'{path}')
+        return result["text"]
