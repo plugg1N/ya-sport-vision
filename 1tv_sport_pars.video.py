@@ -3,7 +3,7 @@ import time
 import subprocess
 
 import aiofiles
-import requests
+# import requests
 import httpx
 from bs4 import BeautifulSoup
 
@@ -25,58 +25,67 @@ async def get_audio(filename: str) -> None:
     subprocess.run(f'ffmpeg -loglevel error -i "{filename}.ts" "{filename}.mp3"', shell=True)
 
 
-def get_video_part(index: int):
-    try:
-        response = requests.get(
-            url=f"https://v1-dtln.1internet.tv/video/multibitrate/video/2023/12/16/b1d626ed-d910-4f3f-ad6c-7ea468e9195c_HD-news-2023_12_17-18_10_17_,350,950,3800,8000,.mp4.urlset/seg-{index}-f4-v1-a1.ts",
-            headers=headers
-        )
-        if response.ok:
-            with open(f"videos\\video_{index}.ts", "wb") as f:
-                f.write(response.content)
-            print(f"Часть {index} готова")
-    except:
-        print(f"Часть {index} пропущена")
-        time.sleep(3)
+async def concat_video(list_of_videos: list[str], video_id: str, path_to_video: str) -> str:
+    videos = "|".join(list(sorted(list_of_videos)))
+    name_video = r"{}\1tv_video_{}.mp4".format(path_to_video, video_id)
+    subprocess.run('ffmpeg -i "concat:{}" -vcodec copy -acodec copy {}'.format(videos, name_video))
+    return name_video
 
 
-def download_video():
-    response = requests.get(url='https://v1-dtln.1internet.tv/video/multibitrate/video/2023/12/16/b1d626ed-d910-4f3f-ad6c-7ea468e9195c_HD-news-2023_12_17-18_10_17_,350,950,3800,8000,.mp4.urlset/index-f3-v1-a1.m3u8',
-                            headers=headers)
-    if response.ok:
-        last_index = int(response.text.split("\n")[-3].split("-")[1])
-        for index in range(1, last_index):
-            get_video_part(index)
-        return "success"
+# def get_video_part(index: int):
+#     try:
+#         response = requests.get(
+#             url=f"https://v1-dtln.1internet.tv/video/multibitrate/video/2023/12/16/b1d626ed-d910-4f3f-ad6c-7ea468e9195c_HD-news-2023_12_17-18_10_17_,350,950,3800,8000,.mp4.urlset/seg-{index}-f4-v1-a1.ts",
+#             headers=headers
+#         )
+#         if response.ok:
+#             with open(f"videos\\video_{index}.ts", "wb") as f:
+#                 f.write(response.content)
+#             print(f"Часть {index} готова")
+#     except:
+#         print(f"Часть {index} пропущена")
+#         time.sleep(3)
+#
+#
+# def download_video():
+#     response = requests.get(url='https://v1-dtln.1internet.tv/video/multibitrate/video/2023/12/16/b1d626ed-d910-4f3f-ad6c-7ea468e9195c_HD-news-2023_12_17-18_10_17_,350,950,3800,8000,.mp4.urlset/index-f3-v1-a1.m3u8',
+#                             headers=headers)
+#     if response.ok:
+#         last_index = int(response.text.split("\n")[-3].split("-")[1])
+#         for index in range(1, last_index):
+#             get_video_part(index)
+#         return "success"
+#
+#     else:
+#         return f"Error {response.status_code}"
 
-    else:
-        return f"Error {response.status_code}"
 
-
-async def a_get_video_part(link: str, index: int, session, video_id: str, retry=5):
+async def a_get_video_part(link: str, index: int, session, video_id: str, path_to_video: str, retry=5):
     try:
         response = await session.get(
             f'{link}_,350,950,3800,8000,.mp4.urlset/seg-{index}-f1-v1-a1.ts',
             timeout=30.0
         )
         if response.status_code == 200:
-            async with aiofiles.open(f"videos\\1tv_video_{video_id}_seg{index}.ts", "wb") as f:
+            path = r"{}1tv_video_{}_seg{}.ts".format(path_to_video, video_id, index)
+            async with aiofiles.open(path, "wb") as f:
                 await f.write(response.read())
-            await get_audio(f"videos\\1tv_video_{video_id}_seg{index}")
-            return "success"
+            # await get_audio(f"videos\\1tv_video_{video_id}_seg{index}")
+            return path
     except httpx.PoolTimeout and httpx.RemoteProtocolError:
         if retry == 0:
             # print("Код сдох")
             return "error"
         # print(retry, index)
         await asyncio.sleep(10)
-        await a_get_video_part(link, index, session, video_id, retry-1)
-    # except Exception as e:
+        await a_get_video_part(link, index, session, video_id, path_to_video, retry-1)
+    except Exception as e:
+        return "error"
     #     print(e)
     #     print("Всё легло")
 
 
-async def a_download_video(link: str, session, video_id):
+async def a_download_video(link: str, session, video_id: str, path_to_video: str):
     response = await session.get(
         f'{link}_,350,950,3800,8000,.mp4.urlset/index-f1-v1-a1.m3u8',
         headers=headers,
@@ -89,15 +98,17 @@ async def a_download_video(link: str, session, video_id):
         for parts_of_calls in range(0, last_index+1, 80):
             if parts_of_calls == 0:
                 continue
-            tasks.extend(asyncio.create_task(a_get_video_part(link, index_of_part, session, video_id)) for index_of_part in
+            tasks.extend(asyncio.create_task(a_get_video_part(link, index_of_part, session, video_id, path_to_video)) for index_of_part in
                          range(prev_numb+1, parts_of_calls+1))
             await asyncio.sleep(10)
             prev_numb = parts_of_calls
         if prev_numb < last_index:
-            tasks.extend(asyncio.create_task(a_get_video_part(link, index_of_part, session, video_id)) for index_of_part in
+            tasks.extend(asyncio.create_task(a_get_video_part(link, index_of_part, session, video_id, path_to_video)) for index_of_part in
                          range(prev_numb + 1, last_index + 1))
-        ans = sum(map(lambda x: x == "success", await asyncio.gather(*tasks)))
-        return "success", ans, len(tasks)
+        ans = await asyncio.gather(*tasks)
+        res = len(ans) - sum(map(lambda x: x == "error", ans))
+        paths = list(map(lambda x: x != "error", ans))
+        return "success", res, paths
 
 
 async def get_video_id(session, url: str) -> str:
@@ -127,12 +138,13 @@ async def get_video_url(session, video_id: str) -> str:
     return link
 
 
-async def get_video(url: str) -> tuple[str, int, str]:
+async def get_video(url: str, path_to_video="videos\\") -> tuple[str, int, str]:
     async with httpx.AsyncClient(headers=headers) as session:
         video_id = await get_video_id(session, url)
         link = await get_video_url(session, video_id)
-        status = await a_download_video(link, session, video_id)
-        return status[0], status[1], video_id
+        status = await a_download_video(link, session, video_id, path_to_video)
+        path_to_video = await concat_video(status[2], video_id, path_to_video)
+        return status[0], status[1], path_to_video
 
 
 async def main():
