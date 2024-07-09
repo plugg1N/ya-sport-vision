@@ -1,6 +1,7 @@
 import asyncio
 import time
 import subprocess
+from datetime import datetime
 
 import aiofiles
 # import requests
@@ -147,10 +148,31 @@ async def get_video(url: str, path_to_video="videos\\") -> tuple[str, int, str]:
         return status[0], status[1], path_to_video
 
 
+async def search_videos(name: str) -> list[tuple[str, str]] | None:
+    domen = "https://www.sport1tv.ru"
+
+    async with httpx.AsyncClient(headers=headers) as session:
+        # print(session)
+        response = await session.get(
+            'https://www.sport1tv.ru/search.js?from=1995-01-01&amp;limit=100&amp;offset=0&amp;project_id=110887&amp;q=text%3A{} Полная видеозапись игры&amp;to={}'.format(name, datetime.now().strftime('%Y-%m-%d')),
+            headers=headers,
+            follow_redirects=True
+        )
+        if response.status_code < 400:
+            ans = response.text
+            data = ans.split('append("')[-1].split('");')[0].split(r'href=\"')[1:]
+            # data = list(filter(lambda x: "Полная видеозапись игры" in x, data))
+            results: list[tuple[str, str]] = [(line.split(r'th-color-text-article\">')[-1].split('<')[0].replace(u'\xa0', u' '), domen+line.split('"')[0][:-1]) for line in data]
+            return results
+        else:
+            print(response.status_code)
+    return None
+
+
 async def main():
     start = time.time()
-    url = "https://www.1tv.ru/-/jjxqzo"
-    print(await get_video(url))
+    # url = "https://www.1tv.ru/-/jjxqzo"
+    print(await search_videos("Россия"))
     print(time.time() - start)
 
 
