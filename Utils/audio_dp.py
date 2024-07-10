@@ -1,5 +1,6 @@
 import yt_dlp as youtube_dl
 from pydub import AudioSegment
+import subprocess
 import librosa
 import os
 
@@ -23,16 +24,19 @@ class AudioDispatcher:
 
 
     # Split into batches
-    def split_into_batches(self, *, link: str) -> None:
+    def split_into_batches(self, link: str, *, overlap_ms: int, batches_am: int = 20) -> None:
         self.__get_audio(link=link)
 
         if not os.path.exists('segments'):
             os.mkdir('./segments')
+
+        if not os.path.exists('temp00'):
+            os.mkdir('./temp00')
             
         audio = AudioSegment.from_file('audio.mp3')
 
-        chunk_size = int(librosa.get_duration(path='audio.mp3')) * 1000 // 20  # in milliseconds
-        overlap = 2000                                           # in milliseconds
+        chunk_size = int(librosa.get_duration(path='audio.mp3')) * 1000 // batches_am  # in milliseconds
+        overlap = overlap_ms                                                           # in milliseconds
 
         start, end = 0, chunk_size
 
@@ -43,4 +47,11 @@ class AudioDispatcher:
             end = start + chunk_size
 
             chunk = audio[start:end]
-            chunk.export(os.path.join('segments', f"chunk_{i}.wav"), format="wav")
+
+            full_path = os.path.join('temp00', f"chunk_{i}.wav")
+            new_path = os.path.join('segments', f"chunk_{i}.wav")
+
+            chunk.export(full_path, format="wav")
+            subprocess.run(f'ffmpeg -i "{full_path}" -ac 1 -ar 16000 "{new_path}"', shell=True)
+
+        subprocess.run(f'rm -rf temp00/', shell=True)
