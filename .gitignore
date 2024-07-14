@@ -1,7 +1,0 @@
-venv/
-.venv/
-
-segments/
-temp00/
-
-__pycache__

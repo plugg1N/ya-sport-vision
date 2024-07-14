@@ -1,17 +1,23 @@
-import whisper
 import torch
+
+from io import BytesIO
+from typing import List, Tuple
+
+import warnings
+
+import numpy as np
+from pyannote.audio import Pipeline
+from pydub import AudioSegment
 
 import torch
 import subprocess
 import locale
 from nemo.collections.asr.models import EncDecCTCModel
 
-import torchaudio
 from nemo.collections.asr.modules.audio_preprocessing import (
     AudioToMelSpectrogramPreprocessor as NeMoAudioToMelSpectrogramPreprocessor)
-from nemo.collections.asr.parts.preprocessing.features import (
-    FilterbankFeaturesTA as NeMoFilterbankFeaturesTA)
-
+import torchaudio
+from nemo.collections.asr.parts.preprocessing.features import FilterbankFeaturesTA as NeMoFilterbankFeaturesTA
 
 class FilterbankFeaturesTA(NeMoFilterbankFeaturesTA):
     def __init__(self, mel_scale: str = "htk", wkwargs=None, **kwargs):
@@ -39,6 +45,7 @@ class FilterbankFeaturesTA(NeMoFilterbankFeaturesTA):
         )
 
 
+
 class AudioToMelSpectrogramPreprocessor(NeMoAudioToMelSpectrogramPreprocessor):
     def __init__(self, mel_scale: str = "htk", **kwargs):
         super().__init__(**kwargs)
@@ -53,27 +60,14 @@ class AudioToMelSpectrogramPreprocessor(NeMoAudioToMelSpectrogramPreprocessor):
 
 
 
-
-class Whisper:
-    def __init__(self, model_name: str):
-        self.model_name = model_name
-        self.model = whisper.load_model(self.model_name, device='cuda')
-        print('Model loaded')
-
-
-    # Transcribe
-    def speech_to_text(self, path: str) -> str:
-        result = self.model.transcribe(f'{path}')
-        return result["text"]
-    
-
-
 class GigaAMCTC:
     def __init__(self):
         locale.getpreferredencoding = lambda: "UTF-8"
 
         device = "cuda" if torch.cuda.is_available() else "cpu"
-        config_path = 'CTC-config'
+        self.device = device
+
+        config_path = "../CTC-config"
 
         model = EncDecCTCModel.from_config_file(f"{config_path}/ctc_model_config.yaml")
         ckpt = torch.load(f"{config_path}/ctc_model_weights.ckpt", map_location="cpu")
@@ -83,8 +77,72 @@ class GigaAMCTC:
         self.model = model.to(device)
 
 
-    # Any audio to mono channel and 96Khz
-    def __normalize_audio(self, audio_path: str) -> str:
+    def return_model(self):
+        return self.model
+
+    def audiosegment_to_numpy(self, audiosegment: AudioSegment) -> np.ndarray:
+        """Convert AudioSegment to numpy array."""
+        samples = np.array(audiosegment.get_array_of_samples())
+        if audiosegment.channels == 2:
+            samples = samples.reshape((-1, 2))
+
+        samples = samples.astype(np.float32, order="C") / 32768.0
+        return samples
+
+
+    def segment_audio(
+        self,
+        audio_path: str,
+        pipeline: Pipeline,
+        max_duration: float = 1002.0,
+        min_duration: float = 15.0,
+        new_chunk_threshold: float = 0.2,
+    ) -> Tuple[List[np.ndarray], List[List[float]]]:
+        # Prepare audio for pyannote vad pipeline
+        audio = AudioSegment.from_wav(audio_path)
+        audio_bytes = BytesIO()
+        audio.export(audio_bytes, format="wav")
+        audio_bytes.seek(0)
+
+        # Process audio with pipeline to obtain segments with speech activity
+        sad_segments = pipeline({"uri": "filename", "audio": audio_bytes})
+
+        segments = []
+        curr_duration = 0
+        curr_start = 0
+        curr_end = 0
+        boundaries = []
+
+        # Concat segments from pipeline into chunks for asr according to max/min duration
+        for segment in sad_segments.get_timeline().support():
+            start = max(0, segment.start)
+            end = min(len(audio) / 1000, segment.end)
+            if (
+                curr_duration > min_duration and start - curr_end > new_chunk_threshold
+            ) or (curr_duration + (end - curr_end) > max_duration):
+                audio_segment = self.audiosegment_to_numpy(
+                    audio[curr_start * 1000 : curr_end * 1000]
+                )
+                segments.append(audio_segment)
+                boundaries.append([curr_start, curr_end])
+                curr_start = start
+
+            curr_end = end
+            curr_duration = curr_end - curr_start
+
+        if curr_duration != 0:
+            audio_segment = self.audiosegment_to_numpy(
+                audio[curr_start * 1000 : curr_end * 1000]
+            )
+            segments.append(audio_segment)
+            boundaries.append([curr_start, curr_end])
+
+        return segments, boundaries
+
+
+
+    # Any audio to mono channel and 16Khz
+    def normalize_audio(self, audio_path: str) -> str:
         filename = audio_path.split(".")[0]
 
         subprocess.run(f'ffmpeg -i {audio_path} -ac 1 -ar 16000 {filename}.wav', shell=True)
@@ -93,11 +151,19 @@ class GigaAMCTC:
 
     # Run transcribation
     def speech_to_text(self, audio_path: str) -> str:
-        path = self.__normalize_audio(audio_path)
-
         torch.cuda.empty_cache()
-        return self.model.transcribe([path])
+
+        HF_TOKEN = "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"
+
+        warnings.simplefilter("ignore")
+        pipeline = Pipeline.from_pretrained(
+        "pyannote/voice-activity-detection", use_auth_token=HF_TOKEN)
+        pipeline = pipeline.to(torch.device(self.device))
+
+        segments, _ = self.segment_audio(audio_path, pipeline)
+
+        # Transcribing segments
+        BATCH_SIZE = 2
+        return self.model.transcribe(segments, batch_size=BATCH_SIZE)
 
 
-stt = GigaAMCTC()
-print(stt.speech_to_text('videoplayback.m4a'))

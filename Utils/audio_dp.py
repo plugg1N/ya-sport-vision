@@ -1,13 +1,11 @@
 import yt_dlp as youtube_dl
-from pydub import AudioSegment
+from pytube import YouTube
 import subprocess
-import librosa
-import os
 
 
 class AudioDispatcher:
-    # Download a video from YouTube
-    def __get_audio(self, *, link: str) -> None:
+    # Download a video from YouTube using yt_dl
+    def dl_get_audio(self, *, link: str) -> None:
         ydl_opts = {
         'format': 'bestaudio/best',
         'outtmpl': './audio',
@@ -23,35 +21,25 @@ class AudioDispatcher:
             ydl.download([link])
 
 
-    # Split into batches
-    def split_into_batches(self, link: str, *, overlap_ms: int, batches_am: int = 20) -> None:
-        self.__get_audio(link=link)
+    # Download a video from YouTube using yt_dl
+    def tube_get_audio(self, *, link: str) -> None:
+        youtube_video = YouTube(link)
+        stream_number = 0
+        streaminfo = youtube_video.streams.filter(file_extension='mp4')
 
-        if not os.path.exists('segments'):
-            os.mkdir('./segments')
+        for s in streaminfo:
+            if 'itag="22"' in str(s):
+                stream_number = 22
+            elif 'itag="18"' in str(s):
+                stream_number = 18
 
-        if not os.path.exists('temp00'):
-            os.mkdir('./temp00')
-            
-        audio = AudioSegment.from_file('audio.mp3')
+        stream = youtube_video.streams.get_by_itag(stream_number)
+        stream.download(filename='video.mp4', timeout=12000)
 
-        chunk_size = int(librosa.get_duration(path='audio.mp3')) * 1000 // batches_am  # in milliseconds
-        overlap = overlap_ms                                                           # in milliseconds
+        subprocess.run(f'ffmpeg -loglevel error -i "video.mp4" "audio.mp3"',shell=True)
 
-        start, end = 0, chunk_size
 
-        num_chunks = (len(audio) - overlap) // (chunk_size - overlap)
 
-        for i in range(num_chunks):
-            start = i * (chunk_size - overlap)
-            end = start + chunk_size
+    def split_into_batches(self, *, file_name: str, overlap_s: int, chunk_length: int = 20) -> None:
+        subprocess.run(f'./chunking {file_name} {overlap_s} {chunk_length}', shell=True)
 
-            chunk = audio[start:end]
-
-            full_path = os.path.join('temp00', f"chunk_{i}.wav")
-            new_path = os.path.join('segments', f"chunk_{i}.wav")
-
-            chunk.export(full_path, format="wav")
-            subprocess.run(f'ffmpeg -i "{full_path}" -ac 1 -ar 16000 "{new_path}"', shell=True)
-
-        subprocess.run(f'rm -rf temp00/', shell=True)
