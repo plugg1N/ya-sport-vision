@@ -10,8 +10,9 @@ extern "C" {
 
 void run_ffmpeg(int i, double start_time, double chunk_length, double overlap_s, std::string file_name) {
     std::ostringstream command;
-    command << "ffmpeg -hide_banner -loglevel error -ss " << start_time
-            << " -i " << file_name << " -ac 1 -ar 16000 -t " << chunk_length
+    command << "ffmpeg -hide_banner -loglevel error -i " << file_name
+            << " -ss " << start_time
+            << " -ac 1 -ar 16000 -t " << chunk_length
             << " segments/chunk_" << i << ".wav -y";
     std::system(command.str().c_str());
 }
@@ -49,6 +50,8 @@ int main(int argc, char* argv[]) {
     if (argc < 2) {
         std::cerr << "Not enough args provided" << std::endl;
     }
+
+    std::system("mkdir segments");
 
     const std::string file_name = argv[1];
     const int overlap_s = std::stoi(argv[2]);

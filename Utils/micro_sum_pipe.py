@@ -123,7 +123,7 @@ def gen_answer(question: User_qustion,llm: Llama):
     return ans
 
 
-@app.post("/gen_conspect")
+@app.post()
 def gen_conspect(question: User_qustion, llm: Llama):
     inst = f"""
     <start_of_turn>user

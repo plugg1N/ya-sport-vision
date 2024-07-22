@@ -1,169 +1,78 @@
-import torch
+import asyncio
+import json
+import os
+from dotenv import load_dotenv
 
-from io import BytesIO
-from typing import List, Tuple
+from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 
-import warnings
+from typing import List
 
-import numpy as np
-from pyannote.audio import Pipeline
-from pydub import AudioSegment
+from glob import glob
+from stt import YaSpeechKit
+from audio_dp import AudioDispatcher
 
-import torch
-import subprocess
-import locale
-from nemo.collections.asr.models import EncDecCTCModel
+load_dotenv()
 
-from nemo.collections.asr.modules.audio_preprocessing import (
-    AudioToMelSpectrogramPreprocessor as NeMoAudioToMelSpectrogramPreprocessor)
-import torchaudio
-from nemo.collections.asr.parts.preprocessing.features import FilterbankFeaturesTA as NeMoFilterbankFeaturesTA
+token: str = os.getenv("YA_SPEECH_KIT")
 
-class FilterbankFeaturesTA(NeMoFilterbankFeaturesTA):
-    def __init__(self, mel_scale: str = "htk", wkwargs=None, **kwargs):
-        if "window_size" in kwargs:
-            del kwargs["window_size"]
-        if "window_stride" in kwargs:
-            del kwargs["window_stride"]
+# Initialize FastAPI app
+stt = YaSpeechKit(token)
+adp = AudioDispatcher()
 
-        super().__init__(**kwargs)
+# Kafka configuration
+KAFKA_BOOTSTRAP_SERVERS = 'localhost:9092'
 
-        self._mel_spec_extractor: torchaudio.transforms.MelSpectrogram = (
-            torchaudio.transforms.MelSpectrogram(
-                sample_rate=self._sample_rate,
-                win_length=self.win_length,
-                hop_length=self.hop_length,
-                n_mels=kwargs["nfilt"],
-                window_fn=self.torch_windows[kwargs["window"]],
-                mel_scale=mel_scale,
-                norm=kwargs["mel_norm"],
-                n_fft=kwargs["n_fft"],
-                f_max=kwargs.get("highfreq", None),
-                f_min=kwargs.get("lowfreq", 0),
-                wkwargs=wkwargs,
-            )
-        )
+def process_file(file_path: str):
+    adp.split_into_batches(file_name=file_path, overlap_s=1, chunk_length=210)
+
+    chunk_paths = glob('./segments/*')
+    try:
+        for path in chunk_paths:
+            text_chank = ""
+            for text_part in stt.speech_to_text(path):
+                text_chank += text_part
+            yield text_chank
+    except Exception as e:
+        print(e)
+    finally:
+        os.system('rm -rf segments')
 
 
+async def consume_kafka_messages():
+    global producer, consumer
 
-class AudioToMelSpectrogramPreprocessor(NeMoAudioToMelSpectrogramPreprocessor):
-    def __init__(self, mel_scale: str = "htk", **kwargs):
-        super().__init__(**kwargs)
-        kwargs["nfilt"] = kwargs["features"]
-        del kwargs["features"]
-        self.featurizer = (
-            FilterbankFeaturesTA(  # Deprecated arguments; kept for config compatibility
-                mel_scale=mel_scale,
-                **kwargs,
-            )
-        )
+    producer = AIOKafkaProducer(
+        bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
+        value_serializer=lambda x: json.dumps(x).encode('utf-8')
+    )
 
-
-
-class GigaAMCTC:
-    def __init__(self):
-        locale.getpreferredencoding = lambda: "UTF-8"
-
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.device = device
-
-        config_path = "../CTC-config"
-
-        model = EncDecCTCModel.from_config_file(f"{config_path}/ctc_model_config.yaml")
-        ckpt = torch.load(f"{config_path}/ctc_model_weights.ckpt", map_location="cpu")
-        model.load_state_dict(ckpt, strict=False)
-        model.eval()
-
-        self.model = model.to(device)
+    consumer = AIOKafkaConsumer(
+        "stt_get",
+        bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
+        value_deserializer=lambda x: json.loads(x.decode('utf-8'))
+    )
 
 
-    def return_model(self):
-        return self.model
-
-    def audiosegment_to_numpy(self, audiosegment: AudioSegment) -> np.ndarray:
-        """Convert AudioSegment to numpy array."""
-        samples = np.array(audiosegment.get_array_of_samples())
-        if audiosegment.channels == 2:
-            samples = samples.reshape((-1, 2))
-
-        samples = samples.astype(np.float32, order="C") / 32768.0
-        return samples
-
-
-    def segment_audio(
-        self,
-        audio_path: str,
-        pipeline: Pipeline,
-        max_duration: float = 1002.0,
-        min_duration: float = 15.0,
-        new_chunk_threshold: float = 0.2,
-    ) -> Tuple[List[np.ndarray], List[List[float]]]:
-        # Prepare audio for pyannote vad pipeline
-        audio = AudioSegment.from_wav(audio_path)
-        audio_bytes = BytesIO()
-        audio.export(audio_bytes, format="wav")
-        audio_bytes.seek(0)
-
-        # Process audio with pipeline to obtain segments with speech activity
-        sad_segments = pipeline({"uri": "filename", "audio": audio_bytes})
-
-        segments = []
-        curr_duration = 0
-        curr_start = 0
-        curr_end = 0
-        boundaries = []
-
-        # Concat segments from pipeline into chunks for asr according to max/min duration
-        for segment in sad_segments.get_timeline().support():
-            start = max(0, segment.start)
-            end = min(len(audio) / 1000, segment.end)
-            if (
-                curr_duration > min_duration and start - curr_end > new_chunk_threshold
-            ) or (curr_duration + (end - curr_end) > max_duration):
-                audio_segment = self.audiosegment_to_numpy(
-                    audio[curr_start * 1000 : curr_end * 1000]
-                )
-                segments.append(audio_segment)
-                boundaries.append([curr_start, curr_end])
-                curr_start = start
-
-            curr_end = end
-            curr_duration = curr_end - curr_start
-
-        if curr_duration != 0:
-            audio_segment = self.audiosegment_to_numpy(
-                audio[curr_start * 1000 : curr_end * 1000]
-            )
-            segments.append(audio_segment)
-            boundaries.append([curr_start, curr_end])
-
-        return segments, boundaries
+    await producer.start()
+    await consumer.start()
+    try:
+        async for msg in consumer:
+            answer_topic = "stt_give"
+            data = msg.value
+            file_path = data.get("path")
+            if file_path:
+                result = []
+                for chunk in process_file(file_path):
+                    await producer.send_and_wait(answer_topic, {"result": chunk})
+                    result.append(chunk)
+                await producer.send_and_wait("get_rag", {"command": "load_stt", "stt": result, "id": data["id"]})
+                await producer.send_and_wait(answer_topic, {"result": "STOP"})
+            else:
+                await producer.send_and_wait(answer_topic, {"error": "Invalid file path"})
+    finally:
+        await consumer.stop()
+        await producer.stop()
 
 
-
-    # Any audio to mono channel and 16Khz
-    def normalize_audio(self, audio_path: str) -> str:
-        filename = audio_path.split(".")[0]
-
-        subprocess.run(f'ffmpeg -i {audio_path} -ac 1 -ar 16000 {filename}.wav', shell=True)
-        return f'{filename}.wav'
-
-
-    # Run transcribation
-    def speech_to_text(self, audio_path: str) -> str:
-        torch.cuda.empty_cache()
-
-        HF_TOKEN = "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"
-
-        warnings.simplefilter("ignore")
-        pipeline = Pipeline.from_pretrained(
-        "pyannote/voice-activity-detection", use_auth_token=HF_TOKEN)
-        pipeline = pipeline.to(torch.device(self.device))
-
-        segments, _ = self.segment_audio(audio_path, pipeline)
-
-        # Transcribing segments
-        BATCH_SIZE = 2
-        return self.model.transcribe(segments, batch_size=BATCH_SIZE)
-
-
+if __name__ == "__main__":
+    asyncio.run(consume_kafka_messages())

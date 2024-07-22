@@ -1,0 +1,11 @@
+Utils/.env
+CTC-config/*
+
+sum/quant_gemma/*
+__pycache__
+*.wav
+*.mp3
+
+Utils/*.wav
+Utils/videos
+Utils/*.mp3

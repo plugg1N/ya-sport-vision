@@ -1,62 +1,42 @@
-import torch
-
 from io import BytesIO
+from typing import List
+import os
 from typing import List, Tuple
-
-import warnings
-
 import numpy as np
 from pyannote.audio import Pipeline
 from pydub import AudioSegment
-
 import torch
-import subprocess
 import locale
 from nemo.collections.asr.models import EncDecCTCModel
 
-from nemo.collections.asr.modules.audio_preprocessing import (
-    AudioToMelSpectrogramPreprocessor as NeMoAudioToMelSpectrogramPreprocessor)
-import torchaudio
-from nemo.collections.asr.parts.preprocessing.features import FilterbankFeaturesTA as NeMoFilterbankFeaturesTA
 
-class FilterbankFeaturesTA(NeMoFilterbankFeaturesTA):
-    def __init__(self, mel_scale: str = "htk", wkwargs=None, **kwargs):
-        if "window_size" in kwargs:
-            del kwargs["window_size"]
-        if "window_stride" in kwargs:
-            del kwargs["window_stride"]
+from speechkit import model_repository, configure_credentials, creds
+from speechkit.stt import AudioProcessingType
 
-        super().__init__(**kwargs)
 
-        self._mel_spec_extractor: torchaudio.transforms.MelSpectrogram = (
-            torchaudio.transforms.MelSpectrogram(
-                sample_rate=self._sample_rate,
-                win_length=self.win_length,
-                hop_length=self.hop_length,
-                n_mels=kwargs["nfilt"],
-                window_fn=self.torch_windows[kwargs["window"]],
-                mel_scale=mel_scale,
-                norm=kwargs["mel_norm"],
-                n_fft=kwargs["n_fft"],
-                f_max=kwargs.get("highfreq", None),
-                f_min=kwargs.get("lowfreq", 0),
-                wkwargs=wkwargs,
-            )
+class YaSpeechKit:
+    def __init__(self, api_key: str):
+        configure_credentials(yandex_credentials=creds.YandexCredentials(
+            api_key=api_key)
         )
+        print('<log> Speech kit initialized.')
 
 
 
-class AudioToMelSpectrogramPreprocessor(NeMoAudioToMelSpectrogramPreprocessor):
-    def __init__(self, mel_scale: str = "htk", **kwargs):
-        super().__init__(**kwargs)
-        kwargs["nfilt"] = kwargs["features"]
-        del kwargs["features"]
-        self.featurizer = (
-            FilterbankFeaturesTA(  # Deprecated arguments; kept for config compatibility
-                mel_scale=mel_scale,
-                **kwargs,
-            )
-        )
+    def speech_to_text(self, audio_path: str):
+        model = model_repository.recognition_model()
+
+        model.model = 'general'
+        model.language = 'ru-RU'
+        model.audio_processing_type = AudioProcessingType.Full
+
+
+        result = model.transcribe_file(audio_path)
+        for _, res in enumerate(result):
+            if res.has_utterances():
+                for utterance in res.utterances:
+                    yield str(utterance)
+
 
 
 
@@ -94,7 +74,7 @@ class GigaAMCTC:
         self,
         audio_path: str,
         pipeline: Pipeline,
-        max_duration: float = 1002.0,
+        max_duration: float = 300.0,
         min_duration: float = 15.0,
         new_chunk_threshold: float = 0.2,
     ) -> Tuple[List[np.ndarray], List[List[float]]]:
@@ -140,22 +120,12 @@ class GigaAMCTC:
         return segments, boundaries
 
 
-
-    # Any audio to mono channel and 16Khz
-    def normalize_audio(self, audio_path: str) -> str:
-        filename = audio_path.split(".")[0]
-
-        subprocess.run(f'ffmpeg -i {audio_path} -ac 1 -ar 16000 {filename}.wav', shell=True)
-        return f'{filename}.wav'
-
-
     # Run transcribation
     def speech_to_text(self, audio_path: str) -> str:
         torch.cuda.empty_cache()
 
         HF_TOKEN = "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"
 
-        warnings.simplefilter("ignore")
         pipeline = Pipeline.from_pretrained(
         "pyannote/voice-activity-detection", use_auth_token=HF_TOKEN)
         pipeline = pipeline.to(torch.device(self.device))
@@ -167,3 +137,8 @@ class GigaAMCTC:
         return self.model.transcribe(segments, batch_size=BATCH_SIZE)
 
 
+
+
+if __name__ == '__main__':
+#    print(GigaAMCTC().speech_to_text('./segments/chunk_3.wav'))
+    print(YaSpeechKit('AQVN3NvPmtiUySQUR27b_CLg_6swX-6PBCE1sPdm').speech_to_text('./chunk_1.wav'))

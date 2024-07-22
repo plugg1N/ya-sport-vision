@@ -22,7 +22,7 @@ class YoutubeTranscribe:
     def __text_processing(self, *, text: str) -> str:
         clean_text = re.sub(r'\[.*?\]', '', text)
         return clean_text
-    
+
 
     # Get subtitles of the video
     def process_url(self, *, link: str) -> str:
